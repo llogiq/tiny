@@ -6,18 +6,16 @@
 #include <string.h>
 
 #include <errno.h>
-#include <netdb.h>
 #include <signal.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 #include <ncurses.h>
 
+#include "tui.h"
 #include "settings.h"
 #include "textarea.h"
 #include "textfield.h"
+#include "event_loop.h"
+#include "server_comms.h"
 
 // According to rfc2812, IRC messages can't exceed 512 characters - and this
 // includes \r\n, which follows every IRC message.
@@ -35,8 +33,9 @@ int clear_cr_nl();
 
 static volatile sig_atomic_t got_sigwinch = 0;
 
-void sigwinch_handler(int sig)
+static void sigwinch_handler(int sig)
 {
+    (void)sig;
     got_sigwinch = 1;
 }
 
@@ -51,7 +50,7 @@ int main()
 
     if (sigaction(SIGWINCH, &sa, NULL) == -1)
     {
-        printf("Can't register SIGWINCH action.\n");
+        fprintf(stderr, "Can't register SIGWINCH action.\n");
         exit(1);
     }
 
@@ -73,53 +72,30 @@ int main()
 
 void mainloop()
 {
-    abort_msg("Connecting..." );
-    wrefresh( stdscr );
+    TUI tui;
+    tui_init(&tui);
 
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(struct addrinfo));
+    // abort_msg("Connecting..." );
 
-    struct addrinfo* res;
+    wrefresh(stdscr);
 
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
+    ServerComms comms;
+    server_comms_init(&comms, "chat.freenode.org", "6665");
 
-    if ( getaddrinfo( "chat.freenode.org", "6665", &hints, &res ) )
+    wrefresh(stdscr);
+
+    EvLoop ev_loop;
+    ev_loop_init(&ev_loop);
+    ev_loop_add(&ev_loop, 0);
+    ev_loop_add(&ev_loop, comms.sock);
+
+    server_comms_connect(&comms);
+
+    while (true)
     {
-        abort_msg("getaddrinfo(): %s", strerror(errno) );
-        wrefresh( stdscr );
-        return;
-    }
-
-    int sock = socket( AF_INET, SOCK_STREAM, 0 );
-
-    if ( connect( sock, res->ai_addr, res->ai_addrlen ) )
-    {
-        abort_msg("connect(): %s", strerror(errno) );
-        wrefresh( stdscr );
-        return;
-    }
-
-    abort_msg("seems like worked" );
-    wrefresh( stdscr );
-
-    fd_set rfds;
-    // Watch stdin (fd 0) to see when it has input.
-    FD_ZERO( &rfds );
-    FD_SET( 0, &rfds );
-    FD_SET( sock, &rfds );
-    int fdmax = sock;
-
-    TextField input_field;
-    textfield_new(&input_field, RECV_BUF_SIZE, COLS);
-
-    TextArea msg_area;
-    textarea_new(&msg_area, 100, COLS, LINES - 2);
-
-    while ( true )
-    {
-        fd_set rfds_ = rfds;
-        if ( select( fdmax + 1, &rfds_, NULL, NULL, NULL ) == -1 )
+        Events evs;
+        int poll_ret = ev_loop_poll(&ev_loop, &evs);
+        if (poll_ret == -1)
         {
             if (errno == ERESTART)
             {
@@ -130,9 +106,7 @@ void mainloop()
                     endwin();
                     refresh();
 
-                    input_field.width = COLS;
-                    msg_area.height = LINES - 2;
-                    msg_area.width = COLS;
+                    tui_resize(&tui);
 
                     continue;
                 }
@@ -143,38 +117,39 @@ void mainloop()
                 }
             }
         }
-        else if ( FD_ISSET( 0, &rfds_ ) )
+
+        if (events_check(&evs, 0))
         {
             // stdin is ready
-            int ch = getch();
-            KeypressRet ret = textfield_keypressed(&input_field, ch);
+            KeypressRet ret = tui_keypressed(&tui);
             if (ret == SHIP_IT)
             {
-                // Ops.. This won't work. We need \r\n.
-                int msg_len = strlen(input_field.buffer);
+                char* msg = tui_input_buffer(&tui);
+                int msg_len = strlen(msg);
 
                 // We need \r\n suffix before sending the message.
                 // FIXME: This is not how you do it though.
-                input_field.buffer[msg_len    ] = '\r';
-                input_field.buffer[msg_len + 1] = '\n';
-                send(sock, input_field.buffer, msg_len + 2, 0);
-                textarea_add_line(&msg_area, input_field.buffer, msg_len);
-                textfield_reset(&input_field);
+                msg[msg_len    ] = '\r';
+                msg[msg_len + 1] = '\n'; // FIXME segfault here when buf is full
+                server_comms_write(&comms, msg, msg_len + 2);
+                tui_add_line(&tui, msg, msg_len);
+                tui_reset_input_buffer(&tui);
             }
             else if (ret == ABORT)
             {
                 break;
             }
         }
-        else if ( FD_ISSET( sock, &rfds_ ) )
+
+        if (events_check(&evs, comms.sock))
         {
             // socket is ready
-            int recv_ret = recv( sock, recv_buf, RECV_BUF_SIZE, 0 );
-            if ( recv_ret == -1 )
+            int recv_ret = server_comms_read(&comms, recv_buf, RECV_BUF_SIZE);
+            if (recv_ret == -1)
             {
                 abort_msg("recv(): %s", strerror(errno) );
             }
-            else if ( recv_ret == 0 )
+            else if (recv_ret == 0)
             {
                 abort_msg("connection closed" );
                 break;
@@ -185,18 +160,18 @@ void mainloop()
                           recv_ret);
 
                 int cursor_inc = clear_cr_nl();
-                textarea_add_line(&msg_area, recv_buf, cursor_inc);
+                tui_add_line(&tui, recv_buf, cursor_inc);
             }
         }
 
         // For now draw everyting from scratch on any event
         wclear(stdscr);
-        textfield_draw(&input_field, 0, LINES - 2);
-        textarea_draw(&msg_area, 0, 0);
+        tui_draw(&tui);
+
         wrefresh(stdscr);
     }
 
-    close(sock);
+    server_comms_close(&comms);
 }
 
 // This is used for two things:

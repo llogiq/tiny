@@ -83,7 +83,7 @@ Line* line_nth_rev(Line* line, int idx)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int textarea_new(TextArea* textarea, int max_lines, int width, int height)
+int textarea_init(TextArea* textarea, int max_lines, int width, int height)
 {
     if (max_lines == 0)
     {

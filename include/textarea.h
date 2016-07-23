@@ -35,7 +35,7 @@ struct TextArea_
 
 typedef struct TextArea_ TextArea;
 
-int textarea_new(TextArea* textarea, int max_lines, int width, int height);
+int textarea_init(TextArea* textarea, int max_lines, int width, int height);
 
 void textarea_clean(TextArea* textarea);
 

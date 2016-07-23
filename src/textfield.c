@@ -8,7 +8,7 @@
 
 #include <ncurses.h>
 
-int textfield_new(TextField* textfield, int buffer_len, int width)
+int textfield_init(TextField* textfield, int buffer_len, int width)
 {
     // Add one for null termination.
     char* buffer = malloc(buffer_len + 1);
