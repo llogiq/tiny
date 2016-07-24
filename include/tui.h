@@ -11,6 +11,10 @@ typedef struct {
 
 void tui_init(TUI*);
 
+void tui_close(TUI* tui);
+
+void tui_reset(TUI* tui);
+
 void tui_resize(TUI*);
 
 char* tui_input_buffer(TUI*);

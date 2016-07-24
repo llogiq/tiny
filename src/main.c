@@ -8,8 +8,6 @@
 #include <errno.h>
 #include <signal.h>
 
-#include <ncurses.h>
-
 #include "tui.h"
 #include "settings.h"
 #include "textarea.h"
@@ -17,17 +15,10 @@
 #include "event_loop.h"
 #include "server_comms.h"
 
-// According to rfc2812, IRC messages can't exceed 512 characters - and this
-// includes \r\n, which follows every IRC message.
-#define RECV_BUF_SIZE 512
-
-static char recv_buf[ RECV_BUF_SIZE ] = {0};
-
 ////////////////////////////////////////////////////////////////////////////////
 
 void mainloop();
 void abort_msg(const char* fmt, ...);
-int clear_cr_nl();
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -54,18 +45,7 @@ int main()
         exit(1);
     }
 
-    initscr();
-    noecho();
-    keypad( stdscr, TRUE );
-    curs_set( 0 );
-    raw();
-
-    start_color();
-    init_pair( COLOR_CURSOR, COLOR_WHITE, COLOR_GREEN );
-
     mainloop();
-
-    endwin();
 
     return 0;
 }
@@ -77,12 +57,8 @@ void mainloop()
 
     // abort_msg("Connecting..." );
 
-    wrefresh(stdscr);
-
     ServerComms comms;
     server_comms_init(&comms, "chat.freenode.org", "6665");
-
-    wrefresh(stdscr);
 
     EvLoop ev_loop;
     ev_loop_init(&ev_loop);
@@ -91,7 +67,7 @@ void mainloop()
 
     server_comms_connect(&comms);
 
-    while (true)
+    for (;;)
     {
         Events evs;
         int poll_ret = ev_loop_poll(&ev_loop, &evs);
@@ -103,11 +79,8 @@ void mainloop()
                 if (got_sigwinch == 1)
                 {
                     got_sigwinch = 0;
-                    endwin();
-                    refresh();
-
+                    tui_reset(&tui);
                     tui_resize(&tui);
-
                     continue;
                 }
                 else
@@ -144,7 +117,7 @@ void mainloop()
         if (events_check(&evs, comms.sock))
         {
             // socket is ready
-            int recv_ret = server_comms_read(&comms, recv_buf, RECV_BUF_SIZE);
+            int recv_ret = server_comms_read(&comms);
             if (recv_ret == -1)
             {
                 abort_msg("recv(): %s", strerror(errno) );
@@ -159,47 +132,16 @@ void mainloop()
                 abort_msg("recv() got partial msg of len %d",
                           recv_ret);
 
-                int cursor_inc = clear_cr_nl();
-                tui_add_line(&tui, recv_buf, cursor_inc);
+                // TODO:
+                // tui_add_line(&tui, recv_buf, cursor_inc);
             }
         }
 
-        // For now draw everyting from scratch on any event
-        wclear(stdscr);
         tui_draw(&tui);
-
-        wrefresh(stdscr);
     }
 
     server_comms_close(&comms);
-}
-
-// This is used for two things:
-//
-// * We don't want to print \r\n as it confuses ncurses and/or terminals
-//   (cursor moves to new line etc.)
-//
-// * We put the null terminator for printing.
-//
-// * It returns length of the string, so it can be used for incrementing the
-//   cursor etc.
-int clear_cr_nl()
-{
-    for ( int i = 0; i < RECV_BUF_SIZE - 1; ++i )
-    {
-        if ( recv_buf[ i ] == '\r' )
-        {
-            recv_buf[ i     ] = 0;
-            recv_buf[ i + 1 ] = 0;
-            return i;
-        }
-        else if ( recv_buf[ i ] == '\0' )
-        {
-            return i;
-        }
-    }
-
-    return 0;
+    tui_close(&tui);
 }
 
 void abort_msg(const char* fmt, ... )
@@ -207,6 +149,7 @@ void abort_msg(const char* fmt, ... )
     va_list argptr;
     va_start( argptr, fmt );
 
+    /*
     // Clear the line
     for ( int i = 0; i < COLS; i++ )
     {
@@ -215,6 +158,7 @@ void abort_msg(const char* fmt, ... )
 
     wmove( stdscr, LINES - 1, 0 );
     vwprintw( stdscr, fmt, argptr );
+    */
 
     va_end( argptr );
 }
