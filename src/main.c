@@ -124,15 +124,17 @@ void mainloop()
             }
             else if (recv_ret == 0)
             {
-                abort_msg("connection closed" );
+                abort_msg("connection closed");
                 break;
             }
             else
             {
-                abort_msg("recv() got partial msg of len %d",
-                          recv_ret);
+                Msg msg;
+                ParseRet parse_ret = server_comms_parse_msg(&comms, &msg);
+                if (parse_ret == ParseOk)
+                {
 
-                // TODO:
+                }
                 // tui_add_line(&tui, recv_buf, cursor_inc);
             }
         }

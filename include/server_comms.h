@@ -7,7 +7,7 @@ typedef struct {
     int sock;
 
     /** recv() buffer. */
-    void* buf;
+    char* buf;
 
     /**
      * Length of usable part of the buffer. We set this instead of zeroing the
@@ -36,6 +36,7 @@ void server_comms_write(ServerComms*, const void* buf, size_t len);
  * Non-blocking read.
  *
  *   -1 -> Check errno (not available)
+ *    N -> number of bytes read
  **/
 int server_comms_read(ServerComms*);
 
@@ -59,8 +60,8 @@ typedef enum {
 typedef struct {
     CommandType type;
     union {
-        char str_command[10];
-        int num_command;
+        char str_cmd[10];
+        int num_cmd;
     };
 } Command;
 

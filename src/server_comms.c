@@ -89,14 +89,14 @@ ParseRet server_comms_parse_msg(ServerComms* comms, Msg* msg)
         int num3 = buf[pos + 2] - '0';
         int num = (num1 * 100) + (num2 * 10) + num3;
         msg->cmd.type = NumCommand;
-        msg->cmd.num_command = num;
+        msg->cmd.num_cmd = num;
         pos += 4; // skip trailing space too
     }
     else
     {
         // string command
         // FIXME: rename parse_prefix, it's reused here
-        int str_cmd_ret = parse_prefix(buf + pos, buf_len - pos, msg->cmd.str_command);
+        int str_cmd_ret = parse_prefix(buf + pos, buf_len - pos, msg->cmd.str_cmd);
         if (str_cmd_ret < 0) return ParseTryAgain;
         msg->cmd.type = StrCommand;
         pos += str_cmd_ret + 1; // skip trailing space too
@@ -105,16 +105,18 @@ ParseRet server_comms_parse_msg(ServerComms* comms, Msg* msg)
     // parse params
     int params_ret = parse_params(buf + pos, buf_len - pos, msg->params.params);
     if (params_ret < 0) return ParseTryAgain;
+    pos += params_ret;
 
-    memcpy(buf, buf + pos, buf_len - pos);
-    buf_len -= pos;
+    memmove(buf, buf + pos, buf_len - pos);
+    comms->buf_len -= pos;
+    buf[comms->buf_len] = '\0';
     return ParseOk;
 }
 
 /**
  * Returns amount of characters consumed. Returns -1 on error.
  */
-int parse_prefix(char *src, int src_len, char* dst)
+int parse_prefix(char* src, int src_len, char* dst)
 {
     int idx = 0;
     while (idx < src_len)
@@ -144,11 +146,10 @@ int parse_params(char* src, int src_len, char* dst)
             break;
         idx++;
     }
-    idx++; // position of '\n'
 
     if (idx >= src_len) return -1;
 
-    memcpy(dst, src, idx - 2);
+    memcpy(dst, src, idx);
     dst[idx] = '\0';
-    return idx;
+    return idx + 2; // consume \r and \n
 }
